@@ -175,6 +175,62 @@
     cursor:pointer;
   }
   select:focus, input[type=date]:focus{border-color:var(--accent);}
+
+  /* MULTISELECT (checkbox dropdown) */
+  .multiselect{position:relative;}
+  .multiselect-toggle{
+    width:100%;
+    text-align:left;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:13px;
+    padding:8px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .multiselect-toggle:focus, .multiselect.open .multiselect-toggle{border-color:var(--accent);}
+  .multiselect-panel{
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0;
+    min-width:180px;
+    max-height:260px;
+    overflow-y:auto;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:6px;
+    z-index:20;
+    box-shadow:0 12px 28px rgba(0,0,0,.45);
+  }
+  .multiselect-option{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 8px;
+    border-radius:5px;
+    font-size:13px;
+    cursor:pointer;
+    color:var(--text);
+  }
+  .multiselect-option:hover{background:rgba(255,255,255,.04);}
+  .multiselect-option input[type=checkbox]{
+    accent-color:var(--accent);
+    width:14px;height:14px;
+    cursor:pointer;
+  }
+  .multiselect-option.all-option{
+    border-bottom:1px solid var(--line);
+    margin-bottom:4px;
+    padding-bottom:8px;
+    color:var(--text-dim);
+    font-family:var(--mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+  }
   .filter-reset{
     font-family:var(--mono);
     font-size:11px;
@@ -396,8 +452,11 @@
       <select id="f-status"><option value="">Todos</option></select>
     </div>
     <div class="filter-group">
-      <label for="f-data">Data de finalização</label>
-      <select id="f-data"><option value="">Todas</option></select>
+      <label for="f-data-toggle">Data de finalização</label>
+      <div class="multiselect" id="f-data-multiselect">
+        <button type="button" class="multiselect-toggle" id="f-data-toggle">Todas</button>
+        <div class="multiselect-panel" id="f-data-panel" hidden></div>
+      </div>
     </div>
     <div class="filter-group">
       <label for="f-mes">Mês de finalização</label>
@@ -420,7 +479,7 @@ const SHEET_ID = "19bO1x1L3WoNvhQxJrL-bo46f4jQ-j9Hbb_RXuAojh4I";
 const GID = "2010801101";
 
 let rawRows = [];
-let filters = { tipo:"", area:"", etapa:"", status:"", data:"", mes:"" };
+let filters = { tipo:"", area:"", etapa:"", status:"", data:[], mes:"" };
 const MONTH_NAMES = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
 function statusClass(status){
@@ -467,6 +526,76 @@ function populateMonthSelect(){
   });
   if ([...sel.options].some(o=>o.value===current)) sel.value = current;
 }
+
+function populateDateMultiselect(){
+  const dates = [...new Set(rawRows.map(r=>r.data).filter(Boolean))]
+    .sort((a,b)=> parseDateKey(b) - parseDateKey(a)); // mais novo primeiro
+
+  filters.data = filters.data.filter(d => dates.includes(d));
+
+  const panel = document.getElementById("f-data-panel");
+  panel.innerHTML = "";
+
+  const allLabel = document.createElement("label");
+  allLabel.className = "multiselect-option all-option";
+  allLabel.innerHTML = `<input type="checkbox" id="f-data-all"> Todas`;
+  panel.appendChild(allLabel);
+
+  dates.forEach(d=>{
+    const label = document.createElement("label");
+    label.className = "multiselect-option";
+    const checked = filters.data.includes(d) ? "checked" : "";
+    label.innerHTML = `<input type="checkbox" class="f-data-item" value="${d}" ${checked}> ${d}`;
+    panel.appendChild(label);
+  });
+
+  document.getElementById("f-data-all").checked = dates.length>0 && filters.data.length === dates.length;
+  updateDateToggleLabel();
+
+  document.getElementById("f-data-all").addEventListener("change", e=>{
+    const checked = e.target.checked;
+    panel.querySelectorAll(".f-data-item").forEach(cb => cb.checked = checked);
+    filters.data = checked ? dates.slice() : [];
+    updateDateToggleLabel();
+    render();
+  });
+
+  panel.querySelectorAll(".f-data-item").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      filters.data = [...panel.querySelectorAll(".f-data-item:checked")].map(x=>x.value);
+      document.getElementById("f-data-all").checked = filters.data.length === dates.length;
+      updateDateToggleLabel();
+      render();
+    });
+  });
+}
+
+function updateDateToggleLabel(){
+  const toggle = document.getElementById("f-data-toggle");
+  if (!filters.data.length) toggle.textContent = "Todas";
+  else if (filters.data.length === 1) toggle.textContent = filters.data[0];
+  else toggle.textContent = `${filters.data.length} selecionadas`;
+}
+
+function wireDateMultiselect(){
+  const wrap = document.getElementById("f-data-multiselect");
+  const toggle = document.getElementById("f-data-toggle");
+  const panel = document.getElementById("f-data-panel");
+
+  toggle.addEventListener("click", (e)=>{
+    e.stopPropagation();
+    const isOpen = !panel.hidden;
+    panel.hidden = isOpen;
+    wrap.classList.toggle("open", !isOpen);
+  });
+
+  document.addEventListener("click", (e)=>{
+    if (!wrap.contains(e.target)){
+      panel.hidden = true;
+      wrap.classList.remove("open");
+    }
+  });
+}
 function tipoClass(tipo){
   const t = (tipo||"").toLowerCase();
   if (t.includes("estrat")) return "estrategica";
@@ -502,7 +631,7 @@ function render(){
     if (filters.area && r.area !== filters.area) return false;
     if (filters.etapa && r.etapa !== filters.etapa) return false;
     if (filters.status && r.status !== filters.status) return false;
-    if (filters.data && r.data !== filters.data) return false;
+    if (filters.data.length && !filters.data.includes(r.data)) return false;
     if (filters.mes && String(getMonthNumber(r.data)) !== filters.mes) return false;
     return true;
   });
@@ -587,11 +716,13 @@ function wireFilters(){
   document.getElementById("f-area").addEventListener("change", e=>{filters.area=e.target.value; render();});
   document.getElementById("f-etapa").addEventListener("change", e=>{filters.etapa=e.target.value; render();});
   document.getElementById("f-status").addEventListener("change", e=>{filters.status=e.target.value; render();});
-  document.getElementById("f-data").addEventListener("change", e=>{filters.data=e.target.value; render();});
   document.getElementById("f-mes").addEventListener("change", e=>{filters.mes=e.target.value; render();});
+  wireDateMultiselect();
   document.getElementById("reset-filters").addEventListener("click", ()=>{
-    filters = { tipo:"", area:"", etapa:"", status:"", data:"", mes:"" };
-    ["f-tipo","f-area","f-etapa","f-status","f-data","f-mes"].forEach(id=>document.getElementById(id).value="");
+    filters = { tipo:"", area:"", etapa:"", status:"", data:[], mes:"" };
+    ["f-tipo","f-area","f-etapa","f-status","f-mes"].forEach(id=>document.getElementById(id).value="");
+    document.querySelectorAll("#f-data-panel input[type=checkbox]").forEach(cb=>cb.checked=false);
+    updateDateToggleLabel();
     render();
   });
 }
@@ -664,7 +795,7 @@ function handleGvizData(data){
     populateSelect("f-area", rawRows.map(r=>r.area));
     populateSelect("f-etapa", rawRows.map(r=>r.etapa));
     populateSelect("f-status", rawRows.map(r=>r.status));
-    populateSelect("f-data", rawRows.map(r=>r.data));
+    populateDateMultiselect();
     populateMonthSelect();
 
     render();
