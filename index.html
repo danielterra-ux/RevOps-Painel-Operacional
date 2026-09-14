@@ -358,6 +358,83 @@
     border-radius:10px;
   }
 
+  /* TABS */
+  .tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:22px;
+  }
+  .tab-btn{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    background:var(--panel);
+    border:1px solid var(--line);
+    padding:9px 16px;
+    border-radius:8px;
+    cursor:pointer;
+    transition:all .15s;
+  }
+  .tab-btn:hover{color:var(--text);border-color:#2b3547;}
+  .tab-btn.active{
+    color:var(--accent);
+    border-color:var(--accent-dim);
+    background:rgba(79,209,197,.08);
+  }
+
+  /* WEEKLY VIEW */
+  .weekly-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:14px;
+  }
+  .weekly-card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px 20px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .weekly-card-title{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    padding-bottom:10px;
+    border-bottom:1px solid var(--line);
+  }
+  .weekly-card.passada .weekly-card-title{color:var(--slate);}
+  .weekly-card.atual .weekly-card-title{color:var(--accent);}
+  .weekly-card.aprendizados .weekly-card-title{color:var(--yellow);}
+  .weekly-list{list-style:none;display:flex;flex-direction:column;gap:10px;}
+  .weekly-list li{
+    font-size:13px;
+    line-height:1.5;
+    color:var(--text);
+    padding-left:14px;
+    position:relative;
+  }
+  .weekly-list li::before{
+    content:"—";
+    position:absolute;
+    left:0;
+    color:var(--text-faint);
+  }
+  .weekly-card.aprendizados .weekly-list li{color:var(--text-dim);font-style:italic;font-size:12.5px;}
+  .weekly-empty{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--text-faint);
+  }
+
+  @media (max-width:900px){
+    .weekly-grid{grid-template-columns:1fr;}
+  }
+
   footer{
     margin-top:30px;
     text-align:center;
@@ -386,6 +463,13 @@
       <span id="status-text">conectando à planilha…</span>
     </div>
   </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-acoes" type="button">Ações</button>
+    <button class="tab-btn" id="tab-semanal" type="button">Semanal</button>
+  </div>
+
+  <div id="view-acoes">
 
   <div class="kpis">
     <div class="kpi" style="--kpi-color:var(--accent)">
@@ -470,6 +554,25 @@
   <div class="grid" id="grid"></div>
   <div class="empty-state" id="empty" style="display:none;">Nenhuma ação encontrada para os filtros selecionados.</div>
 
+  </div>
+
+  <div id="view-semanal" style="display:none;">
+    <div class="weekly-grid">
+      <div class="weekly-card passada">
+        <div class="weekly-card-title">Checklist semana passada</div>
+        <ul class="weekly-list" id="weekly-passada"></ul>
+      </div>
+      <div class="weekly-card atual">
+        <div class="weekly-card-title">Checklist semana atual</div>
+        <ul class="weekly-list" id="weekly-atual"></ul>
+      </div>
+      <div class="weekly-card aprendizados">
+        <div class="weekly-card-title">Aprendizados e preocupações</div>
+        <ul class="weekly-list" id="weekly-aprendizados"></ul>
+      </div>
+    </div>
+  </div>
+
   <footer>Fonte: Google Sheets · atualização automática a cada 30s · última sincronização: <span id="last-sync">—</span></footer>
 
 </div>
@@ -477,6 +580,12 @@
 <script>
 const SHEET_ID = "19bO1x1L3WoNvhQxJrL-bo46f4jQ-j9Hbb_RXuAojh4I";
 const GID = "2010801101";
+const GID_SEMANAL = "292253334";
+const WEEKLY_HEADERS = {
+  "checklist semana passada": "passada",
+  "checklist semana atual": "atual",
+  "aprendizados e preocupações da semana": "aprendizados",
+};
 
 let rawRows = [];
 let filters = { tipo:"", area:"", etapa:"", status:"", data:[], mes:"" };
@@ -817,9 +926,107 @@ function parsePct(v){
   return isNaN(n) ? 0 : Math.round(n);
 }
 
+function wireTabs(){
+  const btnAcoes = document.getElementById("tab-acoes");
+  const btnSemanal = document.getElementById("tab-semanal");
+  const viewAcoes = document.getElementById("view-acoes");
+  const viewSemanal = document.getElementById("view-semanal");
+
+  btnAcoes.addEventListener("click", ()=>{
+    btnAcoes.classList.add("active");
+    btnSemanal.classList.remove("active");
+    viewAcoes.style.display = "";
+    viewSemanal.style.display = "none";
+  });
+  btnSemanal.addEventListener("click", ()=>{
+    btnSemanal.classList.add("active");
+    btnAcoes.classList.remove("active");
+    viewSemanal.style.display = "";
+    viewAcoes.style.display = "none";
+  });
+}
+
+let semanalJsonpCounter = 0;
+let semanalJsonpTimeout = null;
+
+function fetchSemanalData(){
+  semanalJsonpCounter += 1;
+  const cbName = "gvizSemanalCallback_" + semanalJsonpCounter;
+  const scriptId = "gviz-semanal-script-" + semanalJsonpCounter;
+
+  window[cbName] = function(data){
+    handleSemanalData(data);
+    cleanupSemanalJsonp(cbName, scriptId);
+  };
+
+  clearTimeout(semanalJsonpTimeout);
+  semanalJsonpTimeout = setTimeout(()=>{
+    if (window[cbName]){
+      cleanupSemanalJsonp(cbName, scriptId);
+    }
+  }, 10000);
+
+  const script = document.createElement("script");
+  script.id = scriptId;
+  script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${GID_SEMANAL}&tqx=out:json;responseHandler:${cbName}&_=${Date.now()}`;
+  script.onerror = ()=>{
+    cleanupSemanalJsonp(cbName, scriptId);
+  };
+  document.body.appendChild(script);
+}
+
+function cleanupSemanalJsonp(cbName, scriptId){
+  clearTimeout(semanalJsonpTimeout);
+  delete window[cbName];
+  const el = document.getElementById(scriptId);
+  if (el) el.remove();
+}
+
+function handleSemanalData(data){
+  try{
+    const rows = data.table.rows;
+    const sections = { passada: [], atual: [], aprendizados: [] };
+    let current = null;
+
+    rows.forEach(row=>{
+      const raw = row.c && row.c[0] ? String(row.c[0].f ?? row.c[0].v ?? "").trim() : "";
+      if (!raw) return;
+      const key = WEEKLY_HEADERS[raw.toLowerCase()];
+      if (key){
+        current = key;
+        return;
+      }
+      if (current) sections[current].push(raw);
+    });
+
+    renderWeeklyList("weekly-passada", sections.passada);
+    renderWeeklyList("weekly-atual", sections.atual);
+    renderWeeklyList("weekly-aprendizados", sections.aprendizados);
+  }catch(err){
+    console.error(err);
+  }
+}
+
+function renderWeeklyList(id, items){
+  const ul = document.getElementById(id);
+  ul.innerHTML = "";
+  if (!items.length){
+    ul.innerHTML = `<li class="weekly-empty" style="padding-left:0;">Nada registrado ainda.</li>`;
+    return;
+  }
+  items.forEach(text=>{
+    const li = document.createElement("li");
+    li.textContent = text;
+    ul.appendChild(li);
+  });
+}
+
 wireFilters();
+wireTabs();
 fetchData();
+fetchSemanalData();
 setInterval(fetchData, 30000);
+setInterval(fetchSemanalData, 30000);
 </script>
 </body>
 </html>
